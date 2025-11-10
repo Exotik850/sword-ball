@@ -5,7 +5,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+avian2d = { version = "0.4.1", features = ["simd"] }
 bevy = { version = "0.17" }
+leafwing-input-manager = "0.19.0"
 rand = "0.9"
 # Compile out low-severity logs to improve performance.
 # Remove these features if you want to profile your game with tracy.
