@@ -11,11 +11,17 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
+use crate::duel::dynamic_obj;
+
+pub(super) fn plugin(app: &mut App) {}
+
 #[derive(Component)]
 pub struct Weapon;
 
 fn weapon_joint(player: Entity, weapon: Entity) -> impl Bundle {
-    DistanceJoint::new(player, weapon).with_limits(10., 50.)
+    DistanceJoint::new(weapon, player)
+        .with_limits(0.001, 200.)
+        .with_compliance(0.0)
 }
 
 fn weapon(commands: &mut Commands, player: Entity) -> Entity {
@@ -32,11 +38,9 @@ pub(crate) fn spawn_weapon(
 ) {
     let weapon_entity = weapon(commands, player.entity());
     commands.entity(weapon_entity).insert((
-        Mesh2d(meshes.add(Mesh::from(Circle::new(5.)))),
+        Mesh2d(meshes.add(Mesh::from(Circle::new(20.)))),
         MeshMaterial2d::from(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.2, 0.2)))),
-        Collider::circle(5.),
-        RigidBody::Dynamic,
-        Mass(0.02),
+        dynamic_obj(20.),
         Name::new("Player Weapon"),
         Transform::from_xyz(50., 0., 0.),
     ));
