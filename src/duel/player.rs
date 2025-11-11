@@ -9,13 +9,10 @@ use crate::{duel::weapon::spawn_weapon, screens::Screen};
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(InputManagerPlugin::<PlayerAction>::default())
         // .add_systems(Update, spawn_player)
+        .add_systems(Update, (handle_inputs, wrap_player_position))
         .add_systems(
             Update,
-            (
-                handle_gamepad_connection,
-                handle_inputs,
-                wrap_player_position,
-            ),
+            handle_gamepad_connection.run_if(on_message::<GamepadConnectionEvent>),
         )
         .add_systems(
             OnEnter(Screen::Gameplay),
