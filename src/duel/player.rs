@@ -1,6 +1,10 @@
+use std::thread::spawn;
+
 use avian2d::prelude::*;
 use bevy::{input::gamepad::GamepadConnectionEvent, prelude::*};
 use leafwing_input_manager::prelude::*;
+
+use crate::{duel::weapon::spawn_weapon, screens::Screen};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins(InputManagerPlugin::<PlayerAction>::default())
@@ -12,6 +16,10 @@ pub(super) fn plugin(app: &mut App) {
                 handle_inputs,
                 wrap_player_position,
             ),
+        )
+        .add_systems(
+            OnEnter(Screen::Gameplay),
+            (spawn_player, setup_gamepads).chain(),
         );
 }
 
@@ -22,7 +30,12 @@ pub struct PlayerID(usize);
 pub struct Speed(f32);
 
 #[derive(Component)]
-struct AssignedGamepad(Option<Entity>);
+#[relationship(relationship_target = AssignedPlayer)]
+struct AssignedGamepad(Entity);
+
+#[derive(Component)]
+#[relationship_target(relationship = AssignedGamepad)]
+struct AssignedPlayer(Entity);
 
 #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
 enum PlayerAction {
@@ -43,12 +56,7 @@ fn default_input_map() -> InputMap<PlayerAction> {
 }
 
 fn player(id: usize) -> impl Bundle {
-    (
-        PlayerID(id),
-        AssignedGamepad(None),
-        default_input_map(),
-        Speed(5000.),
-    )
+    (PlayerID(id), default_input_map(), Speed(5000.))
 }
 
 pub(crate) fn spawn_player(
@@ -56,14 +64,17 @@ pub(crate) fn spawn_player(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    commands.spawn((
-        player(0),
-        RigidBody::Dynamic,
-        Collider::circle(15.),
-        Transform::default(),
-        Mesh2d(meshes.add(Mesh::from(Circle::new(15.)))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.3, 0.7, 0.9)))),
-    ));
+    let player = commands
+        .spawn((
+            player(0),
+            RigidBody::Dynamic,
+            Collider::circle(15.),
+            Transform::default(),
+            Mesh2d(meshes.add(Mesh::from(Circle::new(15.)))),
+            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.3, 0.7, 0.9)))),
+        ))
+        .id();
+    // spawn_weapon(&mut commands, &mut meshes, &mut materials, player);
 }
 
 fn wrap_player_position(mut query: Query<&mut Transform, With<PlayerID>>, windows: Query<&Window>) {
@@ -100,9 +111,34 @@ fn handle_inputs(mut query: Query<(&ActionState<PlayerAction>, Forces, &Speed), 
     }
 }
 
+fn setup_gamepads(
+    mut commands: Commands,
+    mut gamepads: Query<Entity, With<Gamepad>>,
+    mut without_gamepad: Query<(Entity, &mut InputMap<PlayerAction>), Without<AssignedGamepad>>,
+) {
+    // Assign gamepads to players without gamepads
+    for (entity, mut input_map) in without_gamepad.iter_mut() {
+        if let Some(gamepad_entity) = gamepads.iter_mut().next() {
+            commands
+                .entity(entity)
+                .insert(AssignedGamepad(gamepad_entity));
+            input_map.set_gamepad(gamepad_entity);
+            println!(
+                "Assigned gamepad {:?} to player entity {:?} on setup",
+                gamepad_entity, entity
+            );
+        }
+    }
+}
+
 fn handle_gamepad_connection(
+    mut commands: Commands,
     mut ev: MessageReader<GamepadConnectionEvent>,
-    mut q: Query<(&mut AssignedGamepad, &mut InputMap<PlayerAction>), With<PlayerID>>,
+    mut q: Query<(
+        Entity,
+        &mut InputMap<PlayerAction>,
+        Option<&AssignedGamepad>,
+    )>,
 ) {
     use bevy::input::gamepad::GamepadConnection;
     for event in ev.read() {
@@ -116,24 +152,32 @@ fn handle_gamepad_connection(
                     "Gamepad connected: {:?}, name: {}, vendor_id: {:?}, product_id: {:?}",
                     event.gamepad, name, vendor_id, product_id
                 );
-                for (mut assigned_gamepad, mut input_map) in q.iter_mut() {
-                    if assigned_gamepad.0.is_none() {
-                        assigned_gamepad.0 = Some(event.gamepad);
-                        *input_map = default_input_map();
-                        println!("Assigned gamepad {:?} to player", event.gamepad);
-                        break;
-                    }
+                let Some((entity, mut input_map, gamepad)) = q.iter_mut().next() else {
+                    println!("No available player entities to assign the gamepad to.");
+                    continue;
+                };
+                if gamepad.is_some() {
+                    continue;
                 }
+                commands
+                    .entity(entity)
+                    .insert(AssignedGamepad(event.gamepad));
+                input_map.set_gamepad(event.gamepad);
+                println!(
+                    "Assigned gamepad {:?} to player entity {:?}",
+                    event.gamepad, entity
+                );
             }
             GamepadConnection::Disconnected => {
-                println!("Gamepad disconnected: {:?}", event.gamepad);
-                for (mut assigned_gamepad, _) in q.iter_mut() {
-                    if assigned_gamepad.0 == Some(event.gamepad) {
-                        assigned_gamepad.0 = None;
-                        println!("Unassigned gamepad {:?} from player", event.gamepad);
-                        break;
-                    }
-                }
+                let Some((entity, mut input_map, _)) = q
+                    .iter_mut()
+                    .find(|(_, input_map, _)| input_map.gamepad() == Some(event.gamepad))
+                else {
+                    continue;
+                };
+                commands.entity(entity).remove::<AssignedGamepad>();
+                input_map.clear_gamepad();
+                println!("Removed gamepad assignment from player entity {:?}", entity);
             }
         }
     }
